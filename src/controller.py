@@ -57,16 +57,17 @@ class Controller:
 
 	def state_initializing_board(self):
 		# TODO: Place the pieces
-		if piece_is_out_of_place:
-			move_piece
-		else:
-			# Determine if it is our turn if the white side of the board is
-			# facing the robot, we can tell this by the color of the corners.
-			is_turn = self.board_orientation > pi
-			if is_turn:
-				self.state = 'pondering'
+		if !is_moving:
+			if piece_is_out_of_place:
+				move_piece
 			else:
-				self.state = 'waiting'
+				# Determine if it is our turn if the white side of the board is
+				# facing the robot, we can tell this by the color of the corners.
+				is_turn = self.board_orientation > pi
+				if is_turn:
+					self.state = 'pondering'
+				else:
+					self.state = 'waiting'
 
 	def state_pondering(self):
 		# Pass piece positions to chess engine and wait for response
