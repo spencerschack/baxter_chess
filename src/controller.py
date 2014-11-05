@@ -1,6 +1,6 @@
 import rospy
 from baxter_interface import *
-from math import *
+from math import pi
 
 class Controller:
 
@@ -49,7 +49,7 @@ class Controller:
 			self.board_position = None # TODO: calculate position
 			self.board_orientation = None # TODO: calculate orientation
 			self.state = 'initializing_board'
-		elif self.head.pan() < 2 * pi  + HEAD_PAN_ANGLE_TOLERANCE:
+		elif self.head.pan() < 2 * pi + HEAD_PAN_ANGLE_TOLERANCE:
 			raise Error('Could not find chessboard in field of view.')
 		else:
 			new_angle = self.head.pan() + HEAD_PAN_ANGLE_TOLERANCE

@@ -43,7 +43,7 @@ class Engine(subprocess.Popen):
 	'''
 	def __init__(self, depth=2, ponder=False, param={}, rand=False, rand_min=90, rand_max=110):
 		subprocess.Popen.__init__(self, 
-			'stockfish',
+			'./stockfish',
 			universal_newlines=True,
 			stdin=subprocess.PIPE,
 			stdout=subprocess.PIPE,)
