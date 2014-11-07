@@ -1,12 +1,19 @@
 import rospy
+from std_msgs.msg import String
 from baxter_interface import *
-from math import *
+from math import pi
 
+# This class acts as the top-level controller, coordinating everything
+# that is not in its own node.
 class Controller:
 
 	def __init__(self):
+		rospy.init_node('baxter_chess_controller')
+		# Latch stores the last message published and sends it to new subscribers.
+		self.state_pub = rospy.Publisher('baxter_chess/controller/state', String, latch=true)
 		self.state = 'initializing_robot'
-		while True:
+		while rospy.is_not_shutdown():
+			self.state_pub.publish(self.state)
 			# Calls the method 'state_<state>'
 			getattr(self, 'state_' + self.state)()
 
@@ -45,11 +52,11 @@ class Controller:
 
 	def state_locating_board(self):
 		board_angle = 0 # TODO: find board and angle relative to camera
-		if -10 < board_angle < 10:
+		if abs(board_angle) < 10:
 			self.board_position = None # TODO: calculate position
 			self.board_orientation = None # TODO: calculate orientation
 			self.state = 'initializing_board'
-		elif self.head.pan() < 2 * pi  + HEAD_PAN_ANGLE_TOLERANCE:
+		elif self.head.pan() < 2 * pi + HEAD_PAN_ANGLE_TOLERANCE:
 			raise Error('Could not find chessboard in field of view.')
 		else:
 			new_angle = self.head.pan() + HEAD_PAN_ANGLE_TOLERANCE
