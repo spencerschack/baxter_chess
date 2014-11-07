@@ -1,24 +1,44 @@
+#! /usr/bin/env python
+
 import rospy
 from std_msgs.msg import String
+from geometry_msgs.msg import PoseStamped
 from baxter_interface import *
 from math import pi
 
 # This class acts as the top-level controller, coordinating everything
 # that is not in its own node.
-class Controller:
+class Control:
 
 	def __init__(self):
-		rospy.init_node('baxter_chess_controller')
+		rospy.init_node('baxter_chess_control')
+
+		self.left_arm_pub = rospy.Publisher('baxter_chess/move/left_arm', PoseStamped)
+		self.right_arm_pub = rospy.Publisher('baxter_chess/move/right_arm', PoseStamped)
+
+		self.left_arm_state = None
+		self.right_arm_state = None
+		rospy.Subscriber('baxter_chess/move/left_arm_state', String, self.received_arm_state, 'left_arm')
+		rospy.Subscriber('baxter_chess/move/right_arm_state', String, self.received_arm_state, 'right_arm')
+
 		# Latch stores the last message published and sends it to new subscribers.
-		self.state_pub = rospy.Publisher('baxter_chess/controller/state', String, latch=true)
+		self.state_pub = rospy.Publisher('baxter_chess/control/state', String, latch=True)
+
 		self.state = 'initializing_robot'
-		while rospy.is_not_shutdown():
+		while not rospy.is_shutdown():
 			self.state_pub.publish(self.state)
 			# Calls the method 'state_<state>'
 			getattr(self, 'state_' + self.state)()
 
+	def received_arm_state(self, state, name):
+		if name == 'left_arm':
+			self.left_arm_state = state
+		elif name == 'right_arm':
+			self.right_arm_state = state
+
 	def state_initializing_robot(self):
 		RobotEnable().enable()
+		rospy.on_shutdown(lambda: RobotEnable().disable())
 
 		# GRIPPERS
 		self.left_gripper = Gripper('left')
@@ -32,6 +52,11 @@ class Controller:
 		self.head_camera = CameraController('head_camera')
 		self.left_hand_camera = CameraController('left_hand_camera')
 		self.right_hand_camera = CameraController('right_hand_camera')
+		# Close the cameras because they could have been open from before this
+		# script launched.
+		self.head_camera.close()
+		self.left_hand_camera.close()
+		self.right_hand_camera.close()
 		resolution = CameraController.MODES[0]
 		self.head_camera.resolution = resolution
 		self.left_hand_camera.resolution = resolution
@@ -45,27 +70,17 @@ class Controller:
 		self.state = 'initializing_locating_board'
 
 	def state_initializing_locating_board(self):
-		self.head_camera.open()
-		# Head pan range is [-PI2, PI2]
-		self.head.set_pan(-2 * pi)
-		self.state = 'locating_board'
+		if self.left_arm_state == 'waiting' and self.right_arm_state == 'waiting':
+			print "SUCCESS!"
 
 	def state_locating_board(self):
-		board_angle = 0 # TODO: find board and angle relative to camera
-		if abs(board_angle) < 10:
-			self.board_position = None # TODO: calculate position
-			self.board_orientation = None # TODO: calculate orientation
-			self.state = 'initializing_board'
-		elif self.head.pan() < 2 * pi + HEAD_PAN_ANGLE_TOLERANCE:
-			raise Error('Could not find chessboard in field of view.')
-		else:
-			new_angle = self.head.pan() + HEAD_PAN_ANGLE_TOLERANCE
-			self.head.set_pan(new_angle)
+		rospy.spin()
+		self.state = 'initializing_board'
 
 	def state_initializing_board(self):
 		# TODO: Place the pieces
-		if !is_moving:
-			if piece_is_out_of_place:
+		if not self.is_moving:
+			if self.piece_is_out_of_place:
 				move_piece
 			else:
 				# Determine if it is our turn if the white side of the board is
@@ -96,4 +111,4 @@ class Controller:
 		pass
 
 if __name__ == '__main__':
-	Controller()
+	Control()
