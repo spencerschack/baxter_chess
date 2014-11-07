@@ -10,9 +10,9 @@ class Controller:
 	def __init__(self):
 		rospy.init_node('baxter_chess_controller')
 		# Latch stores the last message published and sends it to new subscribers.
-		self.state_pub = rospy.Publisher('baxter_chess/controller/state', String, latch=true)
+		self.state_pub = rospy.Publisher('baxter_chess/controller/state', String, latch=True)
 		self.state = 'initializing_robot'
-		while rospy.is_not_shutdown():
+		while not rospy.is_shutdown():
 			self.state_pub.publish(self.state)
 			# Calls the method 'state_<state>'
 			getattr(self, 'state_' + self.state)()
@@ -32,6 +32,11 @@ class Controller:
 		self.head_camera = CameraController('head_camera')
 		self.left_hand_camera = CameraController('left_hand_camera')
 		self.right_hand_camera = CameraController('right_hand_camera')
+		# Close the cameras because they could have been open from before this
+		# script launched.
+		self.head_camera.close()
+		self.left_hand_camera.close()
+		self.right_hand_camera.close()
 		resolution = CameraController.MODES[0]
 		self.head_camera.resolution = resolution
 		self.left_hand_camera.resolution = resolution
@@ -46,26 +51,27 @@ class Controller:
 
 	def state_initializing_locating_board(self):
 		self.head_camera.open()
-		# Head pan range is [-PI2, PI2]
-		self.head.set_pan(-2 * pi)
+		# Head pan range is [-pi/2, pi/2]
+		self.head.set_pan(-pi / 2)
 		self.state = 'locating_board'
 
 	def state_locating_board(self):
-		board_angle = 0 # TODO: find board and angle relative to camera
+		board_angle = 20 # TODO: find board and angle relative to camera
+		rospy.sleep(0.2)
 		if abs(board_angle) < 10:
 			self.board_position = None # TODO: calculate position
 			self.board_orientation = None # TODO: calculate orientation
 			self.state = 'initializing_board'
-		elif self.head.pan() < 2 * pi + HEAD_PAN_ANGLE_TOLERANCE:
-			raise Error('Could not find chessboard in field of view.')
+		elif self.head.pan() >= pi / 2 - HEAD_PAN_ANGLE_TOLERANCE:
+			raise Exception('Could not find chessboard in field of view.')
 		else:
 			new_angle = self.head.pan() + HEAD_PAN_ANGLE_TOLERANCE
 			self.head.set_pan(new_angle)
 
 	def state_initializing_board(self):
 		# TODO: Place the pieces
-		if !is_moving:
-			if piece_is_out_of_place:
+		if not self.is_moving:
+			if self.piece_is_out_of_place:
 				move_piece
 			else:
 				# Determine if it is our turn if the white side of the board is
