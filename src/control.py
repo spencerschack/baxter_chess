@@ -1,9 +1,13 @@
 #! /usr/bin/env python
 
+import sys
 import rospy
 from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped, Point, Quaternion
 from baxter_interface import *
+import moveit_commander
+import tf
+from move import Move
 from math import pi
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
@@ -20,44 +24,22 @@ class Control:
 
 	def __init__(self):
 		rospy.init_node('baxter_chess_control')
-
-		self.left_arm_pub = rospy.Publisher('baxter_chess/move/left_arm', PoseStamped)
-		self.right_arm_pub = rospy.Publisher('baxter_chess/move/right_arm', PoseStamped)
-		self.piece_pub = rospy.Publisher('baxter_chess/piece/move', String)
-
-		self.left_arm_state = None
-		self.right_arm_state = None
-		rospy.Subscriber('baxter_chess/move/left_arm_state', String, self.received_arm_state, 'left_arm')
-		rospy.Subscriber('baxter_chess/move/right_arm_state', String, self.received_arm_state, 'right_arm')
-
-		# Latch stores the last message published and sends it to new subscribers.
 		self.state_pub = rospy.Publisher('baxter_chess/control/state', String, latch=True)
-
-		self.state = 'initializing_robot'
+		self.state = 'initializing'
 		while not rospy.is_shutdown():
 			self.state_pub.publish(self.state)
 			# Calls the method 'state_<state>'
 			getattr(self, 'state_' + self.state)()
 
-	def received_arm_state(self, state, name):
-		if name == 'left_arm':
-			self.left_arm_state = state.data
-		elif name == 'right_arm':
-			self.right_arm_state = state.data
-
-	def state_initializing_robot(self):
+	def state_initializing(self):
 		RobotEnable().enable()
 		rospy.on_shutdown(lambda: RobotEnable().disable())
-
 		# GRIPPERS
 		self.left_gripper = Gripper('left')
 		self.right_gripper = Gripper('right')
-		# These calibrate calls are blocking.
 		self.left_gripper.calibrate()
 		self.right_gripper.calibrate()
-
 		# CAMERAS
-		# These are closed by default. You can only have two open at a time.
 		self.left_hand_camera = CameraController('left_hand_camera')
 		self.right_hand_camera = CameraController('right_hand_camera')
 		resolution = CameraController.MODES[0]
@@ -65,58 +47,45 @@ class Control:
 		self.right_hand_camera.resolution = resolution
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
+		# COMMANDERS
+		moveit_commander.roscpp_initialize(sys.argv)
+		robot = moveit_commander.RobotCommander()
+		scene = moveit_commander.PlanningSceneInterface()
+		self.left_arm = moveit_commander.MoveGroupCommander('left_arm')
+		self.right_arm = moveit_commander.MoveGroupCommander('right_arm')
+		self.left_arm.set_planner_id('RRTConnectkConfigDefault')
+		self.left_arm.set_planning_time(10)
+		self.right_arm.set_planner_id('RRTConnectkConfigDefault')
+		self.right_arm.set_planning_time(10)
+		# TF
+		self.tf = tf.TransformListener()
+		# Move arms to somewhere they can see the board
+		self.move('left_arm', LEFT_ARM_DEFAULT_POSE)
+		self.move('right_arm', RIGHT_ARM_DEFAULT_POSE)
 
-		# EXTREMITIES
-		self.left_limb = Limb('left')
-		self.right_limb = Limb('right')
-		self.head = Head()
+		self.state = 'developing'
 
-		self.state = 'initializing_locating_board'
+	def state_developing(self):
+		name = 'ar_marker_1'
+		time = self.tf.getLatestCommonTime('base', name)
+		position, rotation = self.tf.lookupTransform('base', name, time)
+		pose = PoseStamped()
+		pose.pose.position = Point(position[0], position[1], position[2] + 0.1)
+		pose.pose.orientation = Quaternion(0, -1, 0, 0)
+		self.move('right_arm', pose)
+		pose.pose.position.z -= 0.05
+		self.move('right_arm', pose)
+		self.right_gripper.close(True)
+		pose.pose.position.z += 0.1
+		self.move('right_arm', pose)
 
-	def state_initializing_locating_board(self):
-		if self.left_arm_state == 'waiting' and self.right_arm_state == 'waiting':
-			self.left_arm_pub.publish(LEFT_ARM_DEFAULT_POSE)
-			self.right_arm_pub.publish(RIGHT_ARM_DEFAULT_POSE)
-			rospy.sleep(10)
-			self.piece_pub.publish('ar_marker_1')
-			self.state = 'locating_board'
-
-	def state_locating_board(self):
-		rospy.spin()
-		self.state = 'initializing_board'
-
-	def state_initializing_board(self):
-		# TODO: Place the pieces
-		if not self.is_moving:
-			if self.piece_is_out_of_place:
-				move_piece
-			else:
-				# Determine if it is our turn if the white side of the board is
-				# facing the robot, we can tell this by the color of the corners.
-				is_turn = self.board_orientation > pi
-				if is_turn:
-					self.state = 'pondering'
-				else:
-					self.state = 'waiting'
-
-	def state_pondering(self):
-		# Pass piece positions to chess engine and wait for response
-		if self.game_over:
-			self.state = 'terminating'
-		else:
-			self.state = 'moving'
-
-	def state_waiting(self):
-		# Wait until player moves.
-		self.state = 'moving'
-
-	def state_moving(self):
-		# Get coordinates of piece to move, pass to moveit, and command limb.
-		self.state = 'waiting'
-
-	def state_terminating():
-		# Do whatever ROS needs to do to shutdown
-		pass
+	def move(self, name, pose):
+		pose.header.frame_id = 'base'
+		limb = self.left_arm if name == 'left_arm' else self.right_arm
+		limb.set_pose_target(pose)
+		limb.set_start_state_to_current_state()
+		plan = limb.plan()
+		limb.execute(plan)
 
 if __name__ == '__main__':
 	Control()
