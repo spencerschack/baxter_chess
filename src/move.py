@@ -26,8 +26,6 @@ class Move:
 		robot = moveit_commander.RobotCommander()
 		scene = moveit_commander.PlanningSceneInterface()
 
-		actionlib.SimpleActionClient('robot/limb/left_arm/follow_joint_trajectory', FollowJointTrajectoryAction).wait_for_server()
-		actionlib.SimpleActionClient('robot/limb/right_arm/follow_joint_trajectory', FollowJointTrajectoryAction).wait_for_server()
 		self.left_arm = moveit_commander.MoveGroupCommander('left_arm')
 		self.right_arm = moveit_commander.MoveGroupCommander('right_arm')
 
@@ -39,6 +37,8 @@ class Move:
 
 		self.set_state('left_arm', 'waiting')
 		self.set_state('right_arm', 'waiting')
+
+		rospy.spin()
 
 	def set_state(self, name, state):
 		if name == 'left_arm':
@@ -63,23 +63,19 @@ class Move:
 	def received_command(self, pose, name):
 		# We don't need to lock/synchronize this state read because there is only
 		# one thread per topic. So one thread per arm.
-		if self.get_state(name) == 'waiting':
+		self.set_state(name, 'receiving')
+		pose.header.frame_id = "base"
+		limb = self.get_limb(name)
+		limb.set_pose_target(pose)
+		limb.set_start_state_to_current_state()
 
-			self.set_state(name, 'receiving')
-			pose.header.frame_id = "base"
-			limb = self.get_limb(name)
-			limb.set_pose_target(pose)
-			limb.set_start_state_to_current_state()
+		self.set_state(name, 'planning')
+		plan = limb.plan()
 
-			self.set_state(name, 'planning')
-			plan = limb.plan()
+		self.set_state(name, 'executing')
+		limb.execute(plan)
 
-			self.set_state(name, 'executing')
-			limb.execute(plan)
-
-			self.set_state(name, 'waiting')
-		else:
-			print "Move command ignored for '%s' because it was not in the waiting state"%limb
+		self.set_state(name, 'waiting')
 
 if __name__ == '__main__':
 	Move()

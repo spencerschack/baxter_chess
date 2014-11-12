@@ -1,6 +1,7 @@
 <launch>
-	<node name="controller" pkg="baxter_chess" type="control.py"></node>
-	<node name="move" pkg="baxter_chess" type="move.py"></node>
-	<node name="joint_trajectory_action_server" pkg="baxter_interface" type="joint_trajectory_action_server.py"></node>
-	<include file="$(find baxter_moveit_config)/launch/move_group.launch"></include>
+	<include file="$(find baxter_chess)/launch/ar_track.launch" />
+	<node name="joint_trajectory_action_server" pkg="baxter_interface" type="joint_trajectory_action_server.py" output="screen" />
+	<node name="move" pkg="baxter_chess" type="move.py" output="screen" />
+	<node name="piece" pkg="baxter_chess" type="piece.py" output="screen" />
+	<node name="controller" pkg="baxter_chess" type="control.py" output="screen" />
 </launch>

@@ -2,9 +2,17 @@
 
 import rospy
 from std_msgs.msg import String
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Point, Quaternion
 from baxter_interface import *
 from math import pi
+
+RIGHT_ARM_DEFAULT_POSE = PoseStamped()
+RIGHT_ARM_DEFAULT_POSE.pose.position = Point(0.665, -0.339, 0.068)
+RIGHT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(0.678, -0.671, -0.139, -0.264)
+
+LEFT_ARM_DEFAULT_POSE = PoseStamped()
+LEFT_ARM_DEFAULT_POSE.pose.position = Point(0.731, 0.256, 0.055)
+LEFT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(0.696, 0.677, -0.107, 0.214)
 
 # This class acts as the top-level controller, coordinating everything
 # that is not in its own node.
@@ -15,6 +23,7 @@ class Control:
 
 		self.left_arm_pub = rospy.Publisher('baxter_chess/move/left_arm', PoseStamped)
 		self.right_arm_pub = rospy.Publisher('baxter_chess/move/right_arm', PoseStamped)
+		self.piece_pub = rospy.Publisher('baxter_chess/piece/move', String)
 
 		self.left_arm_state = None
 		self.right_arm_state = None
@@ -32,9 +41,9 @@ class Control:
 
 	def received_arm_state(self, state, name):
 		if name == 'left_arm':
-			self.left_arm_state = state
+			self.left_arm_state = state.data
 		elif name == 'right_arm':
-			self.right_arm_state = state
+			self.right_arm_state = state.data
 
 	def state_initializing_robot(self):
 		RobotEnable().enable()
@@ -49,18 +58,13 @@ class Control:
 
 		# CAMERAS
 		# These are closed by default. You can only have two open at a time.
-		self.head_camera = CameraController('head_camera')
 		self.left_hand_camera = CameraController('left_hand_camera')
 		self.right_hand_camera = CameraController('right_hand_camera')
-		# Close the cameras because they could have been open from before this
-		# script launched.
-		self.head_camera.close()
-		self.left_hand_camera.close()
-		self.right_hand_camera.close()
 		resolution = CameraController.MODES[0]
-		self.head_camera.resolution = resolution
 		self.left_hand_camera.resolution = resolution
 		self.right_hand_camera.resolution = resolution
+		self.left_hand_camera.open()
+		self.right_hand_camera.open()
 
 		# EXTREMITIES
 		self.left_limb = Limb('left')
@@ -71,7 +75,11 @@ class Control:
 
 	def state_initializing_locating_board(self):
 		if self.left_arm_state == 'waiting' and self.right_arm_state == 'waiting':
-			print "SUCCESS!"
+			self.left_arm_pub.publish(LEFT_ARM_DEFAULT_POSE)
+			self.right_arm_pub.publish(RIGHT_ARM_DEFAULT_POSE)
+			rospy.sleep(10)
+			self.piece_pub.publish('ar_marker_1')
+			self.state = 'locating_board'
 
 	def state_locating_board(self):
 		rospy.spin()
