@@ -103,6 +103,8 @@ class Control:
 		for square in chess.SQUARES:
 			piece = self.piece_at(square)
 			# TODO: better observation
+			# basically wait until the board has changed and all pieces are visible
+			# maybe add a timeout depending on how reliable that is
 			if piece != None and piece != self.game.piece_at(square):
 				self.state = 'resolving'
 				break
