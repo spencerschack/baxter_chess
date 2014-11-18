@@ -14,6 +14,7 @@ import tf
 import chess
 import stockfish
 from math import pi, floor
+from copy import deepcopy
 
 PIECE_WIDTH = PIECE_HEIGHT = 0.045
 PIECE_DEPTH = 0.0254
@@ -41,8 +42,6 @@ DEFAULT_MARKER_TYPES = {
 	28: chess.KING, 29: chess.BISHOP, 30: chess.KNIGHT, 31: chess.ROOK
 }
 
-# This class acts as the top-level controller, coordinating everything
-# that is not in its own node.
 class Control:
 
 	def __init__(self):
@@ -124,35 +123,44 @@ class Control:
 	def state_playing(self):
 		move_uci = self.engine.bestmove()['move']
 		move = chess.Move.from_uci(move_uci)
-		to_marker = self.marker_at(move.to_square)
-		from_marker = self.marker_at(move.from_square)
+		to_square = move.to_square
+		from_square = move.from_square
+		to_marker = self.marker_at(to_square)
+		from_marker = self.marker_at(from_square)
 		# Must check against `None` otherwise the 0 marker would be falsy
 		if to_marker != None:
 			# Castling
-			to_color = self.piece_at(move.to_square).color
-			from_color = self.piece_at(move.from_square).color
+			to_color = self.piece_at(to_square).color
+			from_color = self.piece_at(from_square).color
 			if to_color == from_color:
 				self.pickup_piece('left', to_marker)
 				self.move_arm('left')
 				self.pickup_piece('right', from_marker)
 				self.move_arm('right')
-				self.place_piece('left', move.from_square)
+				self.place_piece('left', from_square)
 				self.move_arm('left')
-				self.place_piece('right', move.to_square)
+				self.place_piece('right', to_square)
 				self.move_arm('right')
 			# Attack
 			else:
-				# TODO: en-passant case
 				self.pickup_piece('left', to_marker)
 				self.place_piece('left')
 				self.move_arm('left')
 				self.pickup_piece('right', from_marker)
-				self.place_piece('right', move.to_square)
+				self.place_piece('right', to_square)
 				self.move_arm('right')
 		# Normal
 		else:
+			piece = this.piece_at(from_square)
+			is_pawn = piece.piece_type == chess.PAWN
+			en_passant = this.col(from_square) != this.col(to_square)
+			if is_pawn and en_passant:
+				ep_square = to_square - 8 piece.color == chess.WHITE else to_square + 8
+				self.pickup_piece('left', this.marker_at(ep_square))
+				self.place_piece('left')
+				self.move_arm('left')
 			self.pickup_piece('right', from_marker)
-			self.place_piece('right', move.to_square)
+			self.place_piece('right', to_square)
 			self.move_arm('right')
 		if self.update(move):
 			self.state = 'waiting'
@@ -182,28 +190,32 @@ class Control:
 
 	def piece_for(self, marker):
 		color = chess.WHITE if marker < 14 else chess.BLACK
-		ptype = self.marker_types[marker]
-		return Piece(ptype, color)
+		piece_type = self.marker_types[marker]
+		return Piece(piece_type, color)
 
 	def pose_for(self, marker):
 		return this.marker_poses[marker]
+
+	def row(self, square):
+		return square % 8 + 1
+
+	def col(self, square):
+		return square / 8 + 1
 
 	def received_ar_pose_markers(self, markers, side):
 		for marker in markers:
 			# Special case for AR tags that represent the board.
 			if marker.id == 32:
-				marker_position = marker.pose.pose.position
-				# Move the position from the AR tag to the corner of the board.
-				marker_position.x += SQUARE_WIDTH / 2
-				marker_position.y += SQUARE_HEIGHT / 2
 				self.board_pose = marker.pose
 			elif self.board_pose:
 				marker_position = marker.pose.pose.position
 				board_position = self.board_pose.pose.position
 				dx = marker_position.x - board_position.x
 				dy = marker_position.y - board_position.y
-				ix = floor(dx / SQUARE_WIDTH)
-				iy = floor(dy / SQUARE_HEIGHT)
+				# Plus one half because the board pose marker is half a square unit
+				# away from the actual corner of the board.
+				ix = floor(dx / SQUARE_WIDTH + 0.5)
+				iy = floor(dy / SQUARE_HEIGHT + 0.5)
 				self.marker_board[ix + iy * 8] = marker.id
 				self.marker_poses[marker.id] = marker.pose
 
@@ -226,9 +238,9 @@ class Control:
 		if square == None:
 			pose = # TODO: find next available spot to place attacked piece
 		else:
-			pose = self.board_pose
-			pose.pose.position.x += SQUARE_WIDTH * (square % 8)
-			pose.pose.position.y += SQUARE_HEIGHT * (square / 8)
+			pose = deepcopy(self.board_pose)
+			pose.pose.position.x += SQUARE_WIDTH * this.col(square)
+			pose.pose.position.y += SQUARE_HEIGHT * this.row(square)
 		pose.pose.position.z += VERTICAL_CLEARANCE + PIECE_DEPTH - GRIP_DEPTH
 		self.move_arm(side, pose)
 		pose.pose.position.z -= VERTICAL_CLEARANCE - PIECE_DEPTH
