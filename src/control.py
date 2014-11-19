@@ -219,6 +219,7 @@ class Control:
 				ix = floor(dx / SQUARE_WIDTH + 0.5)
 				iy = floor(dy / SQUARE_HEIGHT + 0.5)
 				self.marker_board[ix + iy * 8] = marker.id
+				# TODO: average right and left
 				self.marker_poses[marker.id] = marker.pose
 
 	# Move the arm to right above the marker, then move down to move the gripper
