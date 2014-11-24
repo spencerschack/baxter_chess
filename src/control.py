@@ -41,14 +41,14 @@ LEFT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(0.140, 0.986, -0.031, 0.081)
 DOWN = Quaternion(0, -1, 0, 0)
 
 DEFAULT_MARKER_TYPES = {
-	 0: chess.PAWN,  1: chess.PAWN,    2: chess.PAWN,    3: chess.PAWN,
-	 4: chess.PAWN,  5: chess.PAWN,    6: chess.PAWN,    7: chess.PAWN,
-	 8: chess.ROOK,  9: chess.KNIGHT, 10: chess.BISHOP, 11: chess.QUEEN,
-	12: chess.KING, 13: chess.BISHOP, 14: chess.KNIGHT, 15: chess.ROOK,
-	16: chess.PAWN, 17: chess.PAWN,   18: chess.PAWN,   19: chess.PAWN,
-	20: chess.PAWN, 21: chess.PAWN,   22: chess.PAWN,   23: chess.PAWN,
-	24: chess.ROOK, 25: chess.KNIGHT, 26: chess.BISHOP, 27: chess.QUEEN,
-	28: chess.KING, 29: chess.BISHOP, 30: chess.KNIGHT, 31: chess.ROOK
+	 0: chess.PAWN,   1: chess.PAWN,    2: chess.PAWN,    3: chess.PAWN,
+	 4: chess.PAWN,   5: chess.PAWN,    6: chess.PAWN,    7: chess.PAWN,
+	 8: chess.ROOK,   9: chess.KNIGHT, 10: chess.BISHOP, 11: chess.KING,
+	12: chess.QUEEN, 13: chess.BISHOP, 14: chess.KNIGHT, 15: chess.ROOK,
+	16: chess.PAWN,  17: chess.PAWN,   18: chess.PAWN,   19: chess.PAWN,
+	20: chess.PAWN,  21: chess.PAWN,   22: chess.PAWN,   23: chess.PAWN,
+	24: chess.ROOK,  25: chess.KNIGHT, 26: chess.BISHOP, 27: chess.KING,
+	28: chess.QUEEN, 29: chess.BISHOP, 30: chess.KNIGHT, 31: chess.ROOK
 }
 
 class Control:
@@ -69,6 +69,7 @@ class Control:
 		self.board_pose = None
 		self.marker_types = DEFAULT_MARKER_TYPES.copy()
 		self.marker_board = [None] * 64
+		self.marker_squares = [None] * 32
 		self.marker_poses = [None] * 32
 		# Chess
 		self.game = chess.Bitboard()
@@ -112,9 +113,19 @@ class Control:
 		self.state = 'dev'
 
 	def state_dev(self):
-		self.pickup_piece('right', 19)
-		self.place_piece('right', 10)
-		self.state = 'game_over'
+		rospy.sleep(1)
+		self.print_board()
+
+	def print_board(self):
+		print '-' * 18
+		for i in range(8):
+			print '|',
+			for j in range(8):
+				piece = self.piece_at(j + i * 8)
+				symbol = piece.symbol() if piece else ' '
+				print symbol,
+			print '|'
+		print '-' * 18
 
 	def state_waiting(self):
 		for square in chess.SQUARES:
@@ -134,7 +145,7 @@ class Control:
 			self.game.pop(move)
 			if match:
 				if self.update(move):
-						state = 'playing'
+					state = 'playing'
 				else:
 					self.state = 'game_over'
 				break
@@ -208,9 +219,9 @@ class Control:
 		return self.marker_board[square]
 
 	def piece_for(self, marker):
-		color = chess.WHITE if marker < 14 else chess.BLACK
+		color = chess.WHITE if marker < 16 else chess.BLACK
 		piece_type = self.marker_types[marker]
-		return Piece(piece_type, color)
+		return chess.Piece(piece_type, color)
 
 	def pose_for(self, marker):
 		return self.marker_poses[marker]
@@ -225,6 +236,8 @@ class Control:
 		for marker in markers.markers:
 			# Special case for AR tags that represent the board.
 			if marker.id == 32:
+				marker.pose.pose.position.x += SQUARE_HEIGHT
+				marker.pose.pose.position.y += SQUARE_WIDTH
 				self.board_pose = marker.pose
 			elif marker.id < 32:
 				if self.board_pose:
@@ -236,7 +249,13 @@ class Control:
 					# away from the actual corner of the board.
 					ix = int(floor(dx / SQUARE_WIDTH + 0.5))
 					iy = int(floor(dy / SQUARE_HEIGHT + 0.5))
-					# self.marker_board[ix + iy * 8] = marker.id
+					if 0 <= ix <= 7 and 0 <= iy <= 7:
+						square = ix * 8 + iy
+						last_square = self.marker_squares[marker.id]
+						if last_square:
+							self.marker_board[last_square] = None
+						self.marker_squares[marker.id] = square
+						self.marker_board[square] = marker.id
 				# TODO: average right and left
 				self.marker_poses[marker.id] = marker.pose
 
