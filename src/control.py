@@ -20,15 +20,22 @@ PIECE_WIDTH = PIECE_HEIGHT = 0.044
 PIECE_DEPTH = 0.028
 SQUARE_WIDTH = SQUARE_HEIGHT = 0.07
 
+VERTICAL_CLEARANCE = 0.07
+GRIP_DEPTH = 0.01
+GRIP_MARGIN = 0.005
+DROP_HEIGHT = 0.01
+
 # Measured from the tf frame 'right_gripper' to the end of the fingers.
 GRIPPER_DEPTH = 0.07
 GRIPPER_WIDTH_OPENED = 0.077
 GRIPPER_WIDTH_CLOSED = 0.036
-GRIPPER_PERCENTAGE = (PIECE_WIDTH - GRIPPER_WIDTH_CLOSED) / (GRIPPER_WIDTH_OPENED - GRIPPER_WIDTH_CLOSED) * 100
 
-VERTICAL_CLEARANCE = 0.07
-GRIP_DEPTH = 0.01
-DROP_HEIGHT = 0.01
+def gripper_percentage(width):
+	diff = GRIPPER_WIDTH_OPENED - GRIPPER_WIDTH_CLOSED
+	return (width - GRIPPER_WIDTH_CLOSED) / diff * 100
+
+GRIPPER_PERCENTAGE_CLOSED = gripper_percentage(PIECE_WIDTH)
+GRIPPER_PERCENTAGE_OPEN = gripper_percentage(PIECE_WIDTH + GRIP_MARGIN * 2)
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
 RIGHT_ARM_DEFAULT_POSE.pose.position = Point(0.595, -0.159, 0.233)
@@ -98,6 +105,8 @@ class Control:
 		self.right_gripper = Gripper('right')
 		self.left_gripper.calibrate()
 		self.right_gripper.calibrate()
+		self.move_gripper('left', 'open')
+		self.move_gripper('right', 'open')
 		# Cameras
 		# Just in case the head camera was open before. It must be closed because
 		# you can only have 2 cameras open at a time.
@@ -110,7 +119,7 @@ class Control:
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
 
-		self.state = 'dev'
+		self.state = 'playing'
 
 	def state_dev(self):
 		rospy.sleep(1)
@@ -128,6 +137,9 @@ class Control:
 		print '-' * 18
 
 	def state_waiting(self):
+		raw_input()
+		self.state = 'resolving'
+		return
 		for square in chess.SQUARES:
 			piece = self.piece_at(square)
 			# TODO: better observation
@@ -227,10 +239,10 @@ class Control:
 		return self.marker_poses[marker]
 
 	def row(self, square):
-		return square % 8 + 1
+		return square / 8 + 1
 
 	def col(self, square):
-		return square / 8 + 1
+		return square % 8 + 1
 
 	def received_ar_pose_markers(self, markers, side):
 		for marker in markers.markers:
@@ -268,6 +280,8 @@ class Control:
 		# This shouldn't be necessary because the ar marker position is centered
 		# but it's off anyway. (See pickup_piece also)
 		pose.pose.position.x += PIECE_WIDTH / 2
+		# Empirical adjustment
+		pose.pose.position.y += 0.005
 		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
 		self.move_arm(side, pose)
 		pose.pose.position.z += -VERTICAL_CLEARANCE - GRIP_DEPTH
@@ -304,9 +318,9 @@ class Control:
 		gripper = self.left_gripper if side == 'left' else self.right_gripper
 		# `True` makes the command blocking.
 		if action == 'open':
-			gripper.open(True)
+			gripper.command_position(GRIPPER_PERCENTAGE_OPEN, True)
 		elif action == 'close':
-			gripper.command_position(GRIPPER_PERCENTAGE, True)
+			gripper.command_position(GRIPPER_PERCENTAGE_CLOSED, True)
 
 	def move_arm(self, name, pose=None):
 		if pose == None:
