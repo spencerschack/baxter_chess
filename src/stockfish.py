@@ -11,6 +11,7 @@
 
 import subprocess
 from random import randint
+import os
 
 class Engine(subprocess.Popen):
 	'''
@@ -19,9 +20,9 @@ class Engine(subprocess.Popen):
 	with value as an integer between 0 and 200.
 	i.e. the following explicitely sets the default parameters
 	{
-		'Mobility (Middle Game)': 100,
+		'Mobility (Midgame)': 100,
 		'Mobility (Endgame)': 100,
-		'Passed Pawns (Middle Game)': 100,
+		'Passed Pawns (Midgame)': 100,
 		'Passed Pawns (Endgame)': 100,
 		'Space': 100,
 		'Aggressiveness': 100,
@@ -42,8 +43,9 @@ class Engine(subprocess.Popen):
 	used so that matches are not between clone engines.	
 	'''
 	def __init__(self, depth=2, ponder=False, param={}, rand=False, rand_min=90, rand_max=110):
+		stockfish = os.path.dirname(os.path.realpath(__file__)) + '/stockfish'
 		subprocess.Popen.__init__(self, 
-			'./stockfish',
+			stockfish,
 			universal_newlines=True,
 			stdin=subprocess.PIPE,
 			stdout=subprocess.PIPE,)
@@ -55,9 +57,9 @@ class Engine(subprocess.Popen):
 
 		if rand:
 			base_param= {
-			'Mobility (Middle Game)': randint(rand_min,rand_max),
+			'Mobility (Midgame)': randint(rand_min,rand_max),
 			'Mobility (Endgame)': randint(rand_min,rand_max),
-			'Passed Pawns (Middle Game)': randint(rand_min,rand_max),
+			'Passed Pawns (Midgame)': randint(rand_min,rand_max),
 			'Passed Pawns (Endgame)': randint(rand_min,rand_max),
 			'Space': randint(rand_min,rand_max),
 			'Aggressiveness': randint(rand_min,rand_max),
@@ -65,9 +67,9 @@ class Engine(subprocess.Popen):
 			}
 		else:
 			base_param={
-			'Mobility (Middle Game)': 100,
+			'Mobility (Midgame)': 100,
 			'Mobility (Endgame)': 100,
-			'Passed Pawns (Middle Game)': 100,
+			'Passed Pawns (Midgame)': 100,
 			'Passed Pawns (Endgame)': 100,
 			'Space': 100,
 			'Aggressiveness': 100,

@@ -6,6 +6,7 @@ from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Vector3
 from moveit_msgs.msg import OrientationConstraint, PositionConstraint, Constraints, BoundingVolume, MoveGroupAction
 from shape_msgs.msg import SolidPrimitive
+from ar_track_alvar.msg import AlvarMarkers, AlvarMarker
 from baxter_interface import *
 from actionlib import SimpleActionClient
 from tuck import Tuck
@@ -14,14 +15,20 @@ import tf
 import chess
 import stockfish
 from math import pi, floor
-from copy import deepcopy
 
-PIECE_WIDTH = PIECE_HEIGHT = 0.045
-PIECE_DEPTH = 0.0254
+PIECE_WIDTH = PIECE_HEIGHT = 0.044
+PIECE_DEPTH = 0.028
 SQUARE_WIDTH = SQUARE_HEIGHT = 0.07
+
+# Measured from the tf frame 'right_gripper' to the end of the fingers.
+GRIPPER_DEPTH = 0.07
+GRIPPER_WIDTH_OPENED = 0.077
+GRIPPER_WIDTH_CLOSED = 0.036
+GRIPPER_PERCENTAGE = (PIECE_WIDTH - GRIPPER_WIDTH_CLOSED) / (GRIPPER_WIDTH_OPENED - GRIPPER_WIDTH_CLOSED) * 100
 
 VERTICAL_CLEARANCE = 0.07
 GRIP_DEPTH = 0.01
+DROP_HEIGHT = 0.01
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
 RIGHT_ARM_DEFAULT_POSE.pose.position = Point(0.595, -0.159, 0.233)
@@ -30,6 +37,8 @@ RIGHT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(-0.142, 0.985, 0.031, 0.090
 LEFT_ARM_DEFAULT_POSE = PoseStamped()
 LEFT_ARM_DEFAULT_POSE.pose.position = Point(0.598, 0.161, 0.222)
 LEFT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(0.140, 0.986, -0.031, 0.081)
+
+DOWN = Quaternion(0, -1, 0, 0)
 
 DEFAULT_MARKER_TYPES = {
 	 0: chess.PAWN,  1: chess.PAWN,    2: chess.PAWN,    3: chess.PAWN,
@@ -60,7 +69,7 @@ class Control:
 		self.board_pose = None
 		self.marker_types = DEFAULT_MARKER_TYPES.copy()
 		self.marker_board = [None] * 64
-		self.marker_poses = {}
+		self.marker_poses = [None] * 32
 		# Chess
 		self.game = chess.Bitboard()
 		self.engine = stockfish.Engine()
@@ -89,6 +98,9 @@ class Control:
 		self.left_gripper.calibrate()
 		self.right_gripper.calibrate()
 		# Cameras
+		# Just in case the head camera was open before. It must be closed because
+		# you can only have 2 cameras open at a time.
+		CameraController('head_camera').close()
 		self.left_hand_camera = CameraController('left_hand_camera')
 		self.right_hand_camera = CameraController('right_hand_camera')
 		resolution = CameraController.MODES[0]
@@ -97,6 +109,11 @@ class Control:
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
 
+		self.state = 'dev'
+
+	def state_dev(self):
+		self.pickup_piece('right', 19)
+		self.place_piece('right', 10)
 		self.state = 'game_over'
 
 	def state_waiting(self):
@@ -153,12 +170,12 @@ class Control:
 				self.move_arm('right')
 		# Normal
 		else:
-			piece = this.piece_at(from_square)
+			piece = self.piece_at(from_square)
 			is_pawn = piece.piece_type == chess.PAWN
-			en_passant = this.col(from_square) != this.col(to_square)
+			en_passant = self.col(from_square) != self.col(to_square)
 			if is_pawn and en_passant:
-				ep_square = to_square - 8 piece.color == chess.WHITE else to_square + 8
-				self.pickup_piece('left', this.marker_at(ep_square))
+				ep_square = to_square - 8 if piece.color == chess.WHITE else to_square + 8
+				self.pickup_piece('left', self.marker_at(ep_square))
 				self.place_piece('left')
 				self.move_arm('left')
 			self.pickup_piece('right', from_marker)
@@ -172,7 +189,7 @@ class Control:
 	def state_game_over(self):
 		self.move_arm('left')
 		self.move_arm('right')
-		rospy.signal_shutdown('Game Over')
+		rospy.spin()
 
 	def update(self, move):
 		if move.promotion != chess.NONE:
@@ -196,7 +213,7 @@ class Control:
 		return Piece(piece_type, color)
 
 	def pose_for(self, marker):
-		return this.marker_poses[marker]
+		return self.marker_poses[marker]
 
 	def row(self, square):
 		return square % 8 + 1
@@ -205,30 +222,36 @@ class Control:
 		return square / 8 + 1
 
 	def received_ar_pose_markers(self, markers, side):
-		for marker in markers:
+		for marker in markers.markers:
 			# Special case for AR tags that represent the board.
 			if marker.id == 32:
 				self.board_pose = marker.pose
-			elif self.board_pose:
-				marker_position = marker.pose.pose.position
-				board_position = self.board_pose.pose.position
-				dx = marker_position.x - board_position.x
-				dy = marker_position.y - board_position.y
-				# Plus one half because the board pose marker is half a square unit
-				# away from the actual corner of the board.
-				ix = floor(dx / SQUARE_WIDTH + 0.5)
-				iy = floor(dy / SQUARE_HEIGHT + 0.5)
-				self.marker_board[ix + iy * 8] = marker.id
+			elif marker.id < 32:
+				if self.board_pose:
+					marker_position = marker.pose.pose.position
+					board_position = self.board_pose.pose.position
+					dx = marker_position.x - board_position.x
+					dy = marker_position.y - board_position.y
+					# Plus one half because the board pose marker is half a square unit
+					# away from the actual corner of the board.
+					ix = int(floor(dx / SQUARE_WIDTH + 0.5))
+					iy = int(floor(dy / SQUARE_HEIGHT + 0.5))
+					# self.marker_board[ix + iy * 8] = marker.id
 				# TODO: average right and left
 				self.marker_poses[marker.id] = marker.pose
 
 	# Move the arm to right above the marker, then move down to move the gripper
 	# into place, close the gripper, move back up to original height.
 	def pickup_piece(self, side, marker):
-		pose = self.pose_for(marker)
-		pose.pose.position.z += self.VERTICAL_CLEARANCE
+		pose = PoseStamped()
+		pose.pose.position = self.pose_for(marker).pose.position
+		pose.pose.orientation = DOWN
+		# This shouldn't be necessary because the ar marker position is centered
+		# but it's off anyway. (See pickup_piece also)
+		pose.pose.position.x += PIECE_WIDTH / 2
+		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
 		self.move_arm(side, pose)
-		pose.pose.position.z -= VERTICAL_CLEARANCE - GRIP_DEPTH
+		pose.pose.position.z += -VERTICAL_CLEARANCE - GRIP_DEPTH
 		self.move_arm(side, pose)
 		self.move_gripper(side, 'close')
 		pose.pose.position.z += VERTICAL_CLEARANCE + PIECE_DEPTH
@@ -238,24 +261,33 @@ class Control:
 	# moves down into place, opens gripper, moves back up to original height. If
 	# no square is passed in, then the piece will be removed from the board.
 	def place_piece(self, side, square=None):
+		pose = PoseStamped()
+		pose.pose.position = self.board_pose.pose.position
+		pose.pose.orientation = DOWN
 		if square == None:
-			pose = # TODO: find next available spot to place attacked piece
+			# TODO: find next available spot to place attacked piece
+			pass
 		else:
-			pose = deepcopy(self.board_pose)
-			pose.pose.position.x += SQUARE_WIDTH * this.col(square)
-			pose.pose.position.y += SQUARE_HEIGHT * this.row(square)
-		pose.pose.position.z += VERTICAL_CLEARANCE + PIECE_DEPTH - GRIP_DEPTH
+			pose.pose.position.x += SQUARE_WIDTH * self.col(square)
+			pose.pose.position.y += SQUARE_HEIGHT * self.row(square)
+		# This shouldn't be necessary because the ar tag positions are referenced from
+		# the center but its off anyway. (See pickup_piece also)
+		pose.pose.position.x += PIECE_WIDTH / 2
+		pose.pose.position.z += VERTICAL_CLEARANCE + 2 * PIECE_DEPTH + GRIPPER_DEPTH - GRIP_DEPTH
 		self.move_arm(side, pose)
-		pose.pose.position.z -= VERTICAL_CLEARANCE - PIECE_DEPTH
+		pose.pose.position.z += -VERTICAL_CLEARANCE - PIECE_DEPTH + DROP_HEIGHT
 		self.move_arm(side, pose)
 		self.move_gripper(side, 'open')
-		pose.pose.position.z += VERTICAL_CLEARANCE + GRIP_DEPTH
+		pose.pose.position.z += VERTICAL_CLEARANCE + GRIP_DEPTH - DROP_HEIGHT
 		self.move_arm(side, pose)
 
 	def move_gripper(self, side, action):
 		gripper = self.left_gripper if side == 'left' else self.right_gripper
 		# `True` makes the command blocking.
-		gripper.open(True) if action == 'open' else gripper.close(True)
+		if action == 'open':
+			gripper.open(True)
+		elif action == 'close':
+			gripper.command_position(GRIPPER_PERCENTAGE, True)
 
 	def move_arm(self, name, pose=None):
 		if pose == None:
@@ -264,8 +296,8 @@ class Control:
 		limb = self.left_arm if name == 'left' else self.right_arm
 		limb.set_pose_target(pose)
 		limb.set_start_state_to_current_state()
-		plan = limb.plan()
-		limb.execute(plan)
+		if not limb.go():
+			raise Exception('Could not move arm')
 
 if __name__ == '__main__':
 	Control()
