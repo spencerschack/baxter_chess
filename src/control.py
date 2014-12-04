@@ -21,21 +21,11 @@ PIECE_DEPTH = 0.028
 SQUARE_WIDTH = SQUARE_HEIGHT = 0.07
 
 VERTICAL_CLEARANCE = 0.07
-GRIP_DEPTH = 0.01
-GRIP_MARGIN = 0.005
-DROP_HEIGHT = 0.01
+DROP_HEIGHT = 0
 
-# Measured from the tf frame 'right_gripper' to the end of the fingers.
-GRIPPER_DEPTH = 0.07
-GRIPPER_WIDTH_OPENED = 0.077
-GRIPPER_WIDTH_CLOSED = 0.036
-
-def gripper_percentage(width):
-	diff = GRIPPER_WIDTH_OPENED - GRIPPER_WIDTH_CLOSED
-	return (width - GRIPPER_WIDTH_CLOSED) / diff * 100
-
-GRIPPER_PERCENTAGE_CLOSED = gripper_percentage(PIECE_WIDTH)
-GRIPPER_PERCENTAGE_OPEN = gripper_percentage(PIECE_WIDTH + GRIP_MARGIN * 2)
+GRIP_DEPTH = 0.04
+# Measured from the tf frame 'right_gripper' to the end of the suction cup.
+GRIPPER_DEPTH = 0.03
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
 RIGHT_ARM_DEFAULT_POSE.pose.position = Point(0.595, -0.159, 0.233)
@@ -98,15 +88,11 @@ class Control:
 		self.left_arm.set_planning_time(10)
 		self.right_arm.set_planner_id('RRTConnectkConfigDefault')
 		self.right_arm.set_planning_time(10)
-		self.move_arm('left')
-		self.move_arm('right')
+		#self.move_arm('left')
+		#self.move_arm('right')
 		# Grippers
 		self.left_gripper = Gripper('left')
 		self.right_gripper = Gripper('right')
-		self.left_gripper.calibrate()
-		self.right_gripper.calibrate()
-		self.move_gripper('left', 'open')
-		self.move_gripper('right', 'open')
 		# Cameras
 		# Just in case the head camera was open before. It must be closed because
 		# you can only have 2 cameras open at a time.
@@ -119,11 +105,13 @@ class Control:
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
 
-		self.state = 'playing'
+		self.state = 'dev'
 
 	def state_dev(self):
-		rospy.sleep(1)
-		self.print_board()
+		if raw_input() == 'p':
+			self.state = 'placing'
+		else:
+			self.print_board()
 
 	def print_board(self):
 		print '-' * 18
@@ -161,6 +149,22 @@ class Control:
 				else:
 					self.state = 'game_over'
 				break
+
+	def state_placing(self):
+		print 'sleeping'
+		rospy.sleep(5)
+		print 'setting game'
+		for square in chess.SQUARES:
+			piece = self.piece_at(square)
+			if piece:
+				self.game.set_piece_at(square, piece)
+			else:
+				self.game.remove_piece_at(square)
+		print 'setting engine'
+		self.engine.setboard(self.game.fen())
+		print 'printing board'
+		self.print_board()
+		self.state = 'playing'
 
 	def state_playing(self):
 		move_uci = self.engine.bestmove()['move']
@@ -224,7 +228,7 @@ class Control:
 
 	def piece_at(self, square):
 		marker = self.marker_at(square)
-		if marker:
+		if marker != None:
 			return self.piece_for(marker)
 
 	def marker_at(self, square):
@@ -264,12 +268,11 @@ class Control:
 					if 0 <= ix <= 7 and 0 <= iy <= 7:
 						square = ix * 8 + iy
 						last_square = self.marker_squares[marker.id]
-						if last_square:
+						if last_square != None:
 							self.marker_board[last_square] = None
 						self.marker_squares[marker.id] = square
 						self.marker_board[square] = marker.id
-				# TODO: average right and left
-				self.marker_poses[marker.id] = marker.pose
+					self.marker_poses[marker.id] = marker.pose
 
 	# Move the arm to right above the marker, then move down to move the gripper
 	# into place, close the gripper, move back up to original height.
@@ -318,9 +321,9 @@ class Control:
 		gripper = self.left_gripper if side == 'left' else self.right_gripper
 		# `True` makes the command blocking.
 		if action == 'open':
-			gripper.command_position(GRIPPER_PERCENTAGE_OPEN, True)
+			gripper.open(True)
 		elif action == 'close':
-			gripper.command_position(GRIPPER_PERCENTAGE_CLOSED, True)
+			gripper.close(True)
 
 	def move_arm(self, name, pose=None):
 		if pose == None:

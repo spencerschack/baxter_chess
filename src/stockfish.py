@@ -12,6 +12,7 @@
 import subprocess
 from random import randint
 import os
+import sys
 
 class Engine(subprocess.Popen):
 	'''
@@ -42,8 +43,9 @@ class Engine(subprocess.Popen):
 	nontrivially.  Depth should be the main determinator of engine strength; rand is 
 	used so that matches are not between clone engines.	
 	'''
-	def __init__(self, depth=2, ponder=False, param={}, rand=False, rand_min=90, rand_max=110):
-		stockfish = os.path.dirname(os.path.realpath(__file__)) + '/stockfish'
+	def __init__(self, depth=10, ponder=False, param={}, rand=False, rand_min=90, rand_max=110):
+		stockfish = 'stockfish_64' if sys.maxsize > 2**32 else 'stockfish_32'
+		stockfish = os.path.dirname(os.path.realpath(__file__)) + '/' + stockfish
 		subprocess.Popen.__init__(self, 
 			stockfish,
 			universal_newlines=True,
@@ -99,6 +101,10 @@ class Engine(subprocess.Popen):
 		stdout = self.isready()
 		if stdout.find('No such')>=0:
 			raise ValueError(stdout)
+
+	def setboard(self, fen):
+		self.put('position fen ' + fen)
+		self.isready()
 
 	def setposition(self, moves=[]):
 		'''
