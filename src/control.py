@@ -167,7 +167,7 @@ class Control:
 		self.state = 'playing'
 
 	def state_playing(self):
-		move_uci = self.engine.bestmove()['move']
+		move_uci = self.next_move()
 		move = chess.Move.from_uci(move_uci)
 		to_square = move.to_square
 		from_square = move.from_square
@@ -217,6 +217,20 @@ class Control:
 		self.move_arm('left')
 		self.move_arm('right')
 		rospy.spin()
+	
+	def next_move(self):
+		# White king-side castle
+		# d1 white king
+		# a1 white rook
+		if False:
+			return 'd1a1'
+		# Fork
+		# e2 white knight
+		# d4 black queen
+		# f4 black king
+		if False:
+			return 'e2d4'
+		return self.engine.bestmove()['move']
 
 	def update(self, move):
 		if move.promotion != chess.NONE:
@@ -253,14 +267,16 @@ class Control:
 			# Special case for AR tags that represent the board.
 			if marker.id == 32:
 				marker.pose.pose.position.x += SQUARE_HEIGHT
-				marker.pose.pose.position.y += SQUARE_WIDTH
+				marker.pose.pose.position.y -= SQUARE_WIDTH
 				self.board_pose = marker.pose
 			elif marker.id < 32:
 				if self.board_pose:
 					marker_position = marker.pose.pose.position
 					board_position = self.board_pose.pose.position
 					dx = marker_position.x - board_position.x
-					dy = marker_position.y - board_position.y
+					# y is negated because the y-axis goes in the opposite
+					# direction as the letters on chess rows.
+					dy = board_position.y - marker_position.y
 					# Plus one half because the board pose marker is half a square unit
 					# away from the actual corner of the board.
 					ix = int(floor(dx / SQUARE_WIDTH + 0.5))
