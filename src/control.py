@@ -16,16 +16,19 @@ import chess
 import stockfish
 from math import pi, floor
 
-PIECE_WIDTH = PIECE_HEIGHT = 0.044
 PIECE_DEPTH = 0.028
-SQUARE_WIDTH = SQUARE_HEIGHT = 0.07
+SQUARE_SIZE = 0.07
 
-VERTICAL_CLEARANCE = 0.07
+VERTICAL_CLEARANCE = 0.1
 DROP_HEIGHT = 0
 
-GRIP_DEPTH = 0.04
+GRIP_DEPTH = 0.02
 # Measured from the tf frame 'right_gripper' to the end of the suction cup.
 GRIPPER_DEPTH = 0.03
+
+# The x coordinate of the suction cup is always a little off.
+PICKUP_X_ADJUSTMENT = -0.01
+PICKUP_Y_ADJUSTMENT = 0
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
 RIGHT_ARM_DEFAULT_POSE.pose.position = Point(0.595, -0.159, 0.233)
@@ -34,6 +37,14 @@ RIGHT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(-0.142, 0.985, 0.031, 0.090
 LEFT_ARM_DEFAULT_POSE = PoseStamped()
 LEFT_ARM_DEFAULT_POSE.pose.position = Point(0.598, 0.161, 0.222)
 LEFT_ARM_DEFAULT_POSE.pose.orientation = Quaternion(0.140, 0.986, -0.031, 0.081)
+
+LEFT_ARM_DEMO1_POSE = PoseStamped()
+LEFT_ARM_DEMO1_POSE.pose.position = Point(0.376, 0.323, -0.124)
+LEFT_ARM_DEMO1_POSE.pose.orientation = Quaternion(-0.142, 0.973, -0.088, -0.161)
+
+RIGHT_ARM_DEMO1_POSE = PoseStamped()
+RIGHT_ARM_DEMO1_POSE.pose.position = Point(0.613, -0.170, -0.013)
+RIGHT_ARM_DEMO1_POSE.pose.orientation = Quaternion(0.482, 0.853, 0.114, -0.164)
 
 DOWN = Quaternion(0, -1, 0, 0)
 
@@ -47,6 +58,15 @@ DEFAULT_MARKER_TYPES = {
 	24: chess.ROOK,  25: chess.KNIGHT, 26: chess.BISHOP, 27: chess.KING,
 	28: chess.QUEEN, 29: chess.BISHOP, 30: chess.KNIGHT, 31: chess.ROOK
 }
+
+# Demo 1: Fork
+#   e2 white knight
+#   d4 black queen
+#   f4 black king
+# Demo 2: White king-side castle
+#   d1 white king
+#   a1 white rook
+DEMO = 1
 
 class Control:
 
@@ -88,8 +108,8 @@ class Control:
 		self.left_arm.set_planning_time(10)
 		self.right_arm.set_planner_id('RRTConnectkConfigDefault')
 		self.right_arm.set_planning_time(10)
-		#self.move_arm('left')
-		#self.move_arm('right')
+		self.move_arm('left')
+		self.move_arm('right')
 		# Grippers
 		self.left_gripper = Gripper('left')
 		self.right_gripper = Gripper('right')
@@ -108,10 +128,9 @@ class Control:
 		self.state = 'dev'
 
 	def state_dev(self):
+		self.print_board()
 		if raw_input() == 'p':
-			self.state = 'placing'
-		else:
-			self.print_board()
+			self.state = 'playing'
 
 	def print_board(self):
 		print '-' * 18
@@ -219,18 +238,12 @@ class Control:
 		rospy.spin()
 	
 	def next_move(self):
-		# White king-side castle
-		# d1 white king
-		# a1 white rook
-		if False:
-			return 'd1a1'
-		# Fork
-		# e2 white knight
-		# d4 black queen
-		# f4 black king
-		if False:
+		if DEMO == 1:
 			return 'e2d4'
-		return self.engine.bestmove()['move']
+		elif DEMO == 2:
+			return 'd1a1'
+		else:
+			return self.engine.bestmove()['move']
 
 	def update(self, move):
 		if move.promotion != chess.NONE:
@@ -257,17 +270,17 @@ class Control:
 		return self.marker_poses[marker]
 
 	def row(self, square):
-		return square / 8 + 1
+		return square % 8
 
 	def col(self, square):
-		return square % 8 + 1
+		return square / 8
 
 	def received_ar_pose_markers(self, markers, side):
 		for marker in markers.markers:
 			# Special case for AR tags that represent the board.
 			if marker.id == 32:
-				marker.pose.pose.position.x += SQUARE_HEIGHT
-				marker.pose.pose.position.y -= SQUARE_WIDTH
+				marker.pose.pose.position.x += SQUARE_SIZE
+				marker.pose.pose.position.y -= SQUARE_SIZE
 				self.board_pose = marker.pose
 			elif marker.id < 32:
 				if self.board_pose:
@@ -279,8 +292,8 @@ class Control:
 					dy = board_position.y - marker_position.y
 					# Plus one half because the board pose marker is half a square unit
 					# away from the actual corner of the board.
-					ix = int(floor(dx / SQUARE_WIDTH + 0.5))
-					iy = int(floor(dy / SQUARE_HEIGHT + 0.5))
+					ix = int(floor(dx / SQUARE_SIZE + 0.5))
+					iy = int(floor(dy / SQUARE_SIZE + 0.5))
 					if 0 <= ix <= 7 and 0 <= iy <= 7:
 						square = ix * 8 + iy
 						last_square = self.marker_squares[marker.id]
@@ -296,11 +309,8 @@ class Control:
 		pose = PoseStamped()
 		pose.pose.position = self.pose_for(marker).pose.position
 		pose.pose.orientation = DOWN
-		# This shouldn't be necessary because the ar marker position is centered
-		# but it's off anyway. (See pickup_piece also)
-		pose.pose.position.x += PIECE_WIDTH / 2
-		# Empirical adjustment
-		pose.pose.position.y += 0.005
+		pose.pose.position.x += PICKUP_X_ADJUSTMENT
+		pose.pose.position.y += PICKUP_Y_ADJUSTMENT
 		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
 		self.move_arm(side, pose)
 		pose.pose.position.z += -VERTICAL_CLEARANCE - GRIP_DEPTH
@@ -316,15 +326,13 @@ class Control:
 		pose = PoseStamped()
 		pose.pose.position = self.board_pose.pose.position
 		pose.pose.orientation = DOWN
-		if square == None:
-			# TODO: find next available spot to place attacked piece
-			pass
-		else:
-			pose.pose.position.x += SQUARE_WIDTH * self.col(square)
-			pose.pose.position.y += SQUARE_HEIGHT * self.row(square)
-		# This shouldn't be necessary because the ar tag positions are referenced from
-		# the center but its off anyway. (See pickup_piece also)
-		pose.pose.position.x += PIECE_WIDTH / 2
+		col = -1
+		row = 2
+		if square != None:
+			col = self.col(square)
+			row = self.row(square)
+		pose.pose.position.x += SQUARE_SIZE * row
+		pose.pose.position.y -= SQUARE_SIZE * col
 		pose.pose.position.z += VERTICAL_CLEARANCE + 2 * PIECE_DEPTH + GRIPPER_DEPTH - GRIP_DEPTH
 		self.move_arm(side, pose)
 		pose.pose.position.z += -VERTICAL_CLEARANCE - PIECE_DEPTH + DROP_HEIGHT
@@ -343,7 +351,12 @@ class Control:
 
 	def move_arm(self, name, pose=None):
 		if pose == None:
-			pose = LEFT_ARM_DEFAULT_POSE if name == 'left' else RIGHT_ARM_DEFAULT_POSE
+			if DEMO == 1:
+				pose = LEFT_ARM_DEMO1_POSE if name == 'left' else RIGHT_ARM_DEMO1_POSE
+			elif DEMO == 2:
+				pose = LEFT_ARM_DEMO2_POSE if name == 'left' else RIGHT_ARM_DEMO2_POSE
+			else:
+				pose = LEFT_ARM_DEFAULT_POSE if name == 'left' else RIGHT_ARM_DEFAULT_POSE
 		pose.header.frame_id = 'base'
 		limb = self.left_arm if name == 'left' else self.right_arm
 		limb.set_pose_target(pose)
