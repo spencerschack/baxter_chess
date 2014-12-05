@@ -15,19 +15,20 @@ import tf
 import chess
 import stockfish
 from math import pi, floor
+from copy import deepcopy
 
 PIECE_DEPTH = 0.028
 SQUARE_SIZE = 0.07
 
-VERTICAL_CLEARANCE = 0.1
-DROP_HEIGHT = 0
+VERTICAL_CLEARANCE = 0.05
+DROP_HEIGHT = 0.01
 
-GRIP_DEPTH = 0.02
+GRIP_DEPTH = 0.025
 # Measured from the tf frame 'right_gripper' to the end of the suction cup.
 GRIPPER_DEPTH = 0.03
 
 # The x coordinate of the suction cup is always a little off.
-PICKUP_X_ADJUSTMENT = -0.01
+PICKUP_X_ADJUSTMENT = -0.04
 PICKUP_Y_ADJUSTMENT = 0
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
@@ -59,13 +60,18 @@ DEFAULT_MARKER_TYPES = {
 	28: chess.QUEEN, 29: chess.BISHOP, 30: chess.KNIGHT, 31: chess.ROOK
 }
 
-# Demo 1: Fork
-#   e2 white knight
-#   d4 black queen
-#   f4 black king
-# Demo 2: White king-side castle
-#   d1 white king
-#   a1 white rook
+DEMO_BOARD_STATES = {
+	1: [
+		(chess.E2, chess.WHITE, chess.KNIGHT),
+		(chess.D4, chess.BLACK, chess.QUEEN),
+		(chess.F4, chess.BLACK, chess.KING)
+	],
+	2: [
+		(chess.D1, chess.WHITE, chess.KING),
+		(chess.A1, chess.WHITE, chess.ROOK)
+	]
+}
+
 DEMO = 1
 
 class Control:
@@ -92,6 +98,10 @@ class Control:
 		self.game = chess.Bitboard()
 		self.engine = stockfish.Engine()
 		self.engine.newgame()
+		if DEMO:
+			self.game.clear()
+			for square, color, piece_type in DEMO_BOARD_STATES[DEMO]:
+				self.game.set_piece_at(square, chess.Piece(piece_type, color))
 		# Enable
 		RobotEnable().enable()
 		# Commanders
@@ -125,23 +135,12 @@ class Control:
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
 
-		self.state = 'dev'
+		self.state = 'playing'
 
-	def state_dev(self):
+	def state_checking(self):
 		self.print_board()
 		if raw_input() == 'p':
 			self.state = 'playing'
-
-	def print_board(self):
-		print '-' * 18
-		for i in range(8):
-			print '|',
-			for j in range(8):
-				piece = self.piece_at(j + i * 8)
-				symbol = piece.symbol() if piece else ' '
-				print symbol,
-			print '|'
-		print '-' * 18
 
 	def state_waiting(self):
 		raw_input()
@@ -170,18 +169,13 @@ class Control:
 				break
 
 	def state_placing(self):
-		print 'sleeping'
-		rospy.sleep(5)
-		print 'setting game'
 		for square in chess.SQUARES:
 			piece = self.piece_at(square)
 			if piece:
 				self.game.set_piece_at(square, piece)
 			else:
 				self.game.remove_piece_at(square)
-		print 'setting engine'
 		self.engine.setboard(self.game.fen())
-		print 'printing board'
 		self.print_board()
 		self.state = 'playing'
 
@@ -190,17 +184,14 @@ class Control:
 		move = chess.Move.from_uci(move_uci)
 		to_square = move.to_square
 		from_square = move.from_square
-		to_marker = self.marker_at(to_square)
-		from_marker = self.marker_at(from_square)
-		# Must check against `None` otherwise the 0 marker would be falsy
-		if to_marker != None:
+		if self.game.piece_at(to_square):
 			# Castling
 			to_color = self.piece_at(to_square).color
 			from_color = self.piece_at(from_square).color
 			if to_color == from_color:
-				self.pickup_piece('left', to_marker)
+				self.pickup_piece('left', to_square)
 				self.move_arm('left')
-				self.pickup_piece('right', from_marker)
+				self.pickup_piece('right', from_square)
 				self.move_arm('right')
 				self.place_piece('left', from_square)
 				self.move_arm('left')
@@ -208,10 +199,10 @@ class Control:
 				self.move_arm('right')
 			# Attack
 			else:
-				self.pickup_piece('left', to_marker)
+				self.pickup_piece('left', to_square)
 				self.place_piece('left')
 				self.move_arm('left')
-				self.pickup_piece('right', from_marker)
+				self.pickup_piece('right', from_square)
 				self.place_piece('right', to_square)
 				self.move_arm('right')
 		# Normal
@@ -221,10 +212,10 @@ class Control:
 			en_passant = self.col(from_square) != self.col(to_square)
 			if is_pawn and en_passant:
 				ep_square = to_square - 8 if piece.color == chess.WHITE else to_square + 8
-				self.pickup_piece('left', self.marker_at(ep_square))
+				self.pickup_piece('left', ep_ssquare)
 				self.place_piece('left')
 				self.move_arm('left')
-			self.pickup_piece('right', from_marker)
+			self.pickup_piece('right', from_square)
 			self.place_piece('right', to_square)
 			self.move_arm('right')
 		if self.update(move):
@@ -275,6 +266,17 @@ class Control:
 	def col(self, square):
 		return square / 8
 
+	def print_board(self):
+		print '-' * 18
+		for i in range(8):
+			print '|',
+			for j in range(8):
+				piece = self.piece_at(j + i * 8)
+				symbol = piece.symbol() if piece else ' '
+				print symbol,
+			print '|'
+		print '-' * 18
+
 	def received_ar_pose_markers(self, markers, side):
 		for marker in markers.markers:
 			# Special case for AR tags that represent the board.
@@ -305,41 +307,50 @@ class Control:
 
 	# Move the arm to right above the marker, then move down to move the gripper
 	# into place, close the gripper, move back up to original height.
-	def pickup_piece(self, side, marker):
+	def pickup_piece(self, side, square):
+		pose = self.pose_at(self.row(square), self.col(square))
+		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
+		pose.pose.position.x += 0.07
+		self.move_arm(side, pose)
+		# Sleep to get new ar tag positions from the camera
+		rospy.sleep(4)
 		pose = PoseStamped()
+		marker = self.marker_at(square)
 		pose.pose.position = self.pose_for(marker).pose.position
 		pose.pose.orientation = DOWN
 		pose.pose.position.x += PICKUP_X_ADJUSTMENT
 		pose.pose.position.y += PICKUP_Y_ADJUSTMENT
-		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
-		self.move_arm(side, pose)
-		pose.pose.position.z += -VERTICAL_CLEARANCE - GRIP_DEPTH
-		self.move_arm(side, pose)
+		pose.pose.position.z += GRIPPER_DEPTH - GRIP_DEPTH
+		self.move_arm(side, pose, True)
 		self.move_gripper(side, 'close')
 		pose.pose.position.z += VERTICAL_CLEARANCE + PIECE_DEPTH
-		self.move_arm(side, pose)
+		self.move_arm(side, pose, True)
 
 	# Assumes piece is already in gripper. Moves arm to right above the square,
 	# moves down into place, opens gripper, moves back up to original height. If
 	# no square is passed in, then the piece will be removed from the board.
 	def place_piece(self, side, square=None):
-		pose = PoseStamped()
-		pose.pose.position = self.board_pose.pose.position
-		pose.pose.orientation = DOWN
 		col = -1
 		row = 2
 		if square != None:
 			col = self.col(square)
 			row = self.row(square)
-		pose.pose.position.x += SQUARE_SIZE * row
-		pose.pose.position.y -= SQUARE_SIZE * col
+		pose = self.pose_at(row, col)
 		pose.pose.position.z += VERTICAL_CLEARANCE + 2 * PIECE_DEPTH + GRIPPER_DEPTH - GRIP_DEPTH
 		self.move_arm(side, pose)
 		pose.pose.position.z += -VERTICAL_CLEARANCE - PIECE_DEPTH + DROP_HEIGHT
-		self.move_arm(side, pose)
+		self.move_arm(side, pose, True)
 		self.move_gripper(side, 'open')
 		pose.pose.position.z += VERTICAL_CLEARANCE + GRIP_DEPTH - DROP_HEIGHT
-		self.move_arm(side, pose)
+		self.move_arm(side, pose, True)
+
+	def pose_at(self, row, col):
+		pose = PoseStamped()
+		pose.pose.position = deepcopy(self.board_pose.pose.position)
+		pose.pose.orientation = DOWN
+		pose.pose.position.x += SQUARE_SIZE * row + PICKUP_X_ADJUSTMENT
+		pose.pose.position.y -= SQUARE_SIZE * col + PICKUP_Y_ADJUSTMENT
+		return pose
 
 	def move_gripper(self, side, action):
 		gripper = self.left_gripper if side == 'left' else self.right_gripper
@@ -349,7 +360,7 @@ class Control:
 		elif action == 'close':
 			gripper.close(True)
 
-	def move_arm(self, name, pose=None):
+	def move_arm(self, name, pose=None, slow=False):
 		if pose == None:
 			if DEMO == 1:
 				pose = LEFT_ARM_DEMO1_POSE if name == 'left' else RIGHT_ARM_DEMO1_POSE
@@ -361,8 +372,16 @@ class Control:
 		limb = self.left_arm if name == 'left' else self.right_arm
 		limb.set_pose_target(pose)
 		limb.set_start_state_to_current_state()
-		if not limb.go():
-			raise Exception('Could not move arm')
+		plan = limb.plan()
+		if not plan:
+			raise Exception('Could not plan')
+		if slow:
+			ratio = 3
+			for point in plan.joint_trajectory.points:
+				point.time_from_start *= ratio
+				point.velocities = [v / ratio for v in point.velocities]
+		if not limb.execute(plan):
+			raise Exception('Could not execute')
 
 if __name__ == '__main__':
 	Control()
