@@ -21,14 +21,14 @@ PIECE_DEPTH = 0.028
 SQUARE_SIZE = 0.07
 
 VERTICAL_CLEARANCE = 0.05
-DROP_HEIGHT = 0.01
+DROP_HEIGHT = 0.02
 
 GRIP_DEPTH = 0.025
 # Measured from the tf frame 'right_gripper' to the end of the suction cup.
 GRIPPER_DEPTH = 0.03
 
 # The x coordinate of the suction cup is always a little off.
-PICKUP_X_ADJUSTMENT = -0.04
+PICKUP_X_ADJUSTMENT = -0.015
 PICKUP_Y_ADJUSTMENT = 0
 
 RIGHT_ARM_DEFAULT_POSE = PoseStamped()
@@ -46,6 +46,30 @@ LEFT_ARM_DEMO1_POSE.pose.orientation = Quaternion(-0.142, 0.973, -0.088, -0.161)
 RIGHT_ARM_DEMO1_POSE = PoseStamped()
 RIGHT_ARM_DEMO1_POSE.pose.position = Point(0.613, -0.170, -0.013)
 RIGHT_ARM_DEMO1_POSE.pose.orientation = Quaternion(0.482, 0.853, 0.114, -0.164)
+
+LEFT_ARM_DEMO2_POSE = PoseStamped()
+LEFT_ARM_DEMO2_POSE.pose.position = Point(0.376, 0.323, -0.124)
+LEFT_ARM_DEMO2_POSE.pose.orientation = Quaternion(-0.142, 0.973, -0.088, -0.161)
+
+RIGHT_ARM_DEMO2_POSE = PoseStamped()
+RIGHT_ARM_DEMO2_POSE.pose.position = Point(0.501, 0.107, -0.054)
+RIGHT_ARM_DEMO2_POSE.pose.orientation = Quaternion(0.097, 0.958, 0.079, -0.258)
+
+LEFT_ARM_DEMO3_POSE = PoseStamped()
+LEFT_ARM_DEMO3_POSE.pose.position = Point(0.376, 0.323, -0.124)
+LEFT_ARM_DEMO3_POSE.pose.orientation = Quaternion(-0.142, 0.973, -0.088, -0.161)
+
+RIGHT_ARM_DEMO3_POSE = PoseStamped()
+RIGHT_ARM_DEMO3_POSE.pose.position = Point(0.654, -0.033, -0.047)
+RIGHT_ARM_DEMO3_POSE.pose.orientation = Quaternion(0.146, 0.955, 0.093, -0.239)
+
+LEFT_ARM_DEMO4_POSE = PoseStamped()
+LEFT_ARM_DEMO4_POSE.pose.position = Point(0.376, 0.323, -0.124)
+LEFT_ARM_DEMO4_POSE.pose.orientation = Quaternion(-0.142, 0.973, -0.088, -0.161)
+
+RIGHT_ARM_DEMO4_POSE = PoseStamped()
+RIGHT_ARM_DEMO4_POSE.pose.position = Point(0.609, -0.017, -0.010)
+RIGHT_ARM_DEMO4_POSE.pose.orientation = Quaternion(0.720, -0.690, -0.069, -0.005)
 
 DOWN = Quaternion(0, -1, 0, 0)
 
@@ -67,12 +91,53 @@ DEMO_BOARD_STATES = {
 		(chess.F4, chess.BLACK, chess.KING)
 	],
 	2: [
-		(chess.D1, chess.WHITE, chess.KING),
-		(chess.A1, chess.WHITE, chess.ROOK)
+		(chess.D4, chess.WHITE, chess.KING),
+		(chess.A4, chess.WHITE, chess.ROOK)
+	],
+	3: [
+		(chess.C4, chess.BLACK, chess.PAWN),
+		(chess.D4, chess.BLACK, chess.PAWN),
+		(chess.E4, chess.BLACK, chess.PAWN),
+		(chess.D3, chess.BLACK, chess.KNIGHT)
+	],
+	4: [
+		(chess.E2, chess.BLACK, chess.KING),
+		(chess.C3, chess.BLACK, chess.QUEEN),
+		(chess.E3, chess.BLACK, chess.PAWN),
+		(chess.C4, chess.BLACK, chess.ROOK),
+		(chess.F4, chess.WHITE, chess.PAWN),
+		(chess.E5, chess.WHITE, chess.ROOK),
+		(chess.E6, chess.WHITE, chess.KING),
+		(chess.F6, chess.WHITE, chess.KNIGHT)
 	]
 }
 
-DEMO = 1
+DEMO_MOVES = {
+	1: 'e2d4',
+	2: 'd4a4',
+	3: 'd3c5',
+	4: None
+}
+
+DEMO_LEFT_ARM_POSES = {
+	1: LEFT_ARM_DEMO1_POSE,
+	2: LEFT_ARM_DEMO2_POSE,
+	3: LEFT_ARM_DEMO3_POSE,
+	4: LEFT_ARM_DEMO4_POSE
+}
+
+DEMO_RIGHT_ARM_POSES = {
+	1: RIGHT_ARM_DEMO1_POSE,
+	2: RIGHT_ARM_DEMO2_POSE,
+	3: RIGHT_ARM_DEMO3_POSE,
+	4: RIGHT_ARM_DEMO4_POSE
+}
+
+# 1: Fork
+# 2: Castle
+# 3: Jump
+# 4: Stockfish
+DEMO = 4
 
 class Control:
 
@@ -98,7 +163,7 @@ class Control:
 		self.game = chess.Bitboard()
 		self.engine = stockfish.Engine()
 		self.engine.newgame()
-		if DEMO:
+		if DEMO and False:
 			self.game.clear()
 			for square, color, piece_type in DEMO_BOARD_STATES[DEMO]:
 				self.game.set_piece_at(square, chess.Piece(piece_type, color))
@@ -135,12 +200,12 @@ class Control:
 		self.left_hand_camera.open()
 		self.right_hand_camera.open()
 
-		self.state = 'playing'
+		self.state = 'checking'
 
 	def state_checking(self):
 		self.print_board()
 		if raw_input() == 'p':
-			self.state = 'playing'
+			self.state = 'placing'
 
 	def state_waiting(self):
 		raw_input()
@@ -185,9 +250,9 @@ class Control:
 		to_square = move.to_square
 		from_square = move.from_square
 		if self.game.piece_at(to_square):
+			to_color = self.game.piece_at(to_square).color
+			from_color = self.game.piece_at(from_square).color
 			# Castling
-			to_color = self.piece_at(to_square).color
-			from_color = self.piece_at(from_square).color
 			if to_color == from_color:
 				self.pickup_piece('left', to_square)
 				self.move_arm('left')
@@ -202,12 +267,14 @@ class Control:
 				self.pickup_piece('left', to_square)
 				self.place_piece('left')
 				self.move_arm('left')
+				rospy.sleep(5)
+				print 'picking up piece from ' + str(from_square)
 				self.pickup_piece('right', from_square)
 				self.place_piece('right', to_square)
 				self.move_arm('right')
 		# Normal
 		else:
-			piece = self.piece_at(from_square)
+			piece = self.game.piece_at(from_square)
 			is_pawn = piece.piece_type == chess.PAWN
 			en_passant = self.col(from_square) != self.col(to_square)
 			if is_pawn and en_passant:
@@ -229,12 +296,11 @@ class Control:
 		rospy.spin()
 	
 	def next_move(self):
-		if DEMO == 1:
-			return 'e2d4'
-		elif DEMO == 2:
-			return 'd1a1'
+		if DEMO and DEMO_MOVES[DEMO]:
+			return DEMO_MOVES[DEMO]
 		else:
-			return self.engine.bestmove()['move']
+			move = self.engine.bestmove()['move']
+			return move
 
 	def update(self, move):
 		if move.promotion != chess.NONE:
@@ -261,17 +327,17 @@ class Control:
 		return self.marker_poses[marker]
 
 	def row(self, square):
-		return square % 8
+		return square / 8
 
 	def col(self, square):
-		return square / 8
+		return square % 8
 
 	def print_board(self):
 		print '-' * 18
 		for i in range(8):
 			print '|',
 			for j in range(8):
-				piece = self.piece_at(j + i * 8)
+				piece = self.piece_at(7 - j + i * 8)
 				symbol = piece.symbol() if piece else ' '
 				print symbol,
 			print '|'
@@ -309,7 +375,8 @@ class Control:
 	# into place, close the gripper, move back up to original height.
 	def pickup_piece(self, side, square):
 		pose = self.pose_at(self.row(square), self.col(square))
-		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH
+		right_fix = 0.02 if side == 'right' else 0
+		pose.pose.position.z += VERTICAL_CLEARANCE + GRIPPER_DEPTH + right_fix
 		pose.pose.position.x += 0.07
 		self.move_arm(side, pose)
 		# Sleep to get new ar tag positions from the camera
@@ -320,7 +387,7 @@ class Control:
 		pose.pose.orientation = DOWN
 		pose.pose.position.x += PICKUP_X_ADJUSTMENT
 		pose.pose.position.y += PICKUP_Y_ADJUSTMENT
-		pose.pose.position.z += GRIPPER_DEPTH - GRIP_DEPTH
+		pose.pose.position.z += GRIPPER_DEPTH - GRIP_DEPTH + right_fix
 		self.move_arm(side, pose, True)
 		self.move_gripper(side, 'close')
 		pose.pose.position.z += VERTICAL_CLEARANCE + PIECE_DEPTH
@@ -348,6 +415,7 @@ class Control:
 		pose = PoseStamped()
 		pose.pose.position = deepcopy(self.board_pose.pose.position)
 		pose.pose.orientation = DOWN
+		print 'calculating pose at %d, %d'%(row, col)
 		pose.pose.position.x += SQUARE_SIZE * row + PICKUP_X_ADJUSTMENT
 		pose.pose.position.y -= SQUARE_SIZE * col + PICKUP_Y_ADJUSTMENT
 		return pose
@@ -362,12 +430,16 @@ class Control:
 
 	def move_arm(self, name, pose=None, slow=False):
 		if pose == None:
-			if DEMO == 1:
-				pose = LEFT_ARM_DEMO1_POSE if name == 'left' else RIGHT_ARM_DEMO1_POSE
-			elif DEMO == 2:
-				pose = LEFT_ARM_DEMO2_POSE if name == 'left' else RIGHT_ARM_DEMO2_POSE
+			if DEMO:
+				if name == 'left':
+					pose = DEMO_LEFT_ARM_POSES[DEMO]
+				else:
+					pose = DEMO_RIGHT_ARM_POSES[DEMO]
 			else:
-				pose = LEFT_ARM_DEFAULT_POSE if name == 'left' else RIGHT_ARM_DEFAULT_POSE
+				if name == 'left':
+					pose = LEFT_ARM_DEFAULT_POSE
+				else:
+					pose = RIGHT_ARM_DEFAULT_POSE
 		pose.header.frame_id = 'base'
 		limb = self.left_arm if name == 'left' else self.right_arm
 		limb.set_pose_target(pose)
