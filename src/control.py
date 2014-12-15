@@ -349,7 +349,7 @@ class Control:
 		elif action == 'close':
 			gripper.close(True)
 
-	def move_arm(self, name, pose=None):
+	def move_arm(self, name, pose=None, slow=False):
 		if pose == None:
 			if DEMO == 1:
 				pose = LEFT_ARM_DEMO1_POSE if name == 'left' else RIGHT_ARM_DEMO1_POSE
